@@ -115,7 +115,7 @@ app.get('/api/get-captcha', async (req, res) => {
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট
+// ৩. ডেটা ভেরিফাই করার রুট (সব ডেটা ডায়নামিক এক্সট্রাকশন)
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
     const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
@@ -142,41 +142,49 @@ app.post('/verify', async (req, res) => {
 
         const html = await response.text();
 
-        // HTML থেকে নির্দিষ্ট তথ্যগুলো নিখুঁতভাবে বের করার ফাংশন
-        const extract = (keyword) => {
-            const regex = new RegExp(`${keyword}[^<]*<\\/td>\\s*<td[^>]*>([\\s\\S]*?)<\\/td>`, 'i');
-            const m = html.match(regex);
-            return m && m[1] ? m[1].replace(/<[^>]*>/g, '').trim() : '';
-        };
+        // যদি রেজাল্ট পেজে 'Registered Person Name' বা 'নিবন্ধিত ব্যক্তির নাম' থাকে
+        if (html.includes('Registered Person Name') || html.includes('নিবন্ধিত ব্যক্তির নাম')) {
+            
+            // ডায়নামিকভাবে সব <tr> এবং <td> বের করার লজিক (অন্ধকারে ঢিল না মেরে সব ডেটা আনা)
+            const regex = /<tr[^>]*>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<\/tr>/gi;
+            let match;
+            let allDataRows = '';
+            
+            while ((match = regex.exec(html)) !== null) {
+                let key = match[1].replace(/<[^>]*>/g, '').trim();
+                let value = match[2].replace(/<[^>]*>/g, '').trim();
+                
+                // ফালতু ফাঁকা ডেটা বা কোড যেন না আসে, তাই চেক করা হচ্ছে
+                if (key && value && key.length < 100) {
+                    allDataRows += `
+                        <tr>
+                            <td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>${key}</b></td>
+                            <td style="padding: 10px; border: 1px solid #ddd;"><b>${value}</b></td>
+                        </tr>
+                    `;
+                }
+            }
 
-        // সব তথ্য একসাথে একটি অবজেক্টে সেভ করা
-        const details = {
-            name: extract('Registered Person Name') || extract('নিবন্ধিত ব্যক্তির নাম'),
-            dob: extract('Date of Birth') || extract('জন্ম তারিখ'),
-            father: extract("Father's Name") || extract('পিতার নাম'),
-            mother: extract("Mother's Name") || extract('মাতার নাম'),
-            gender: extract('Sex') || extract('লিঙ্গ'),
-            birthPlace: extract('Place of Birth') || extract('জন্মস্থান')
-        };
-        
-        if (details.name) {
             res.send(`
-                <div style="font-family: sans-serif; text-align: center; margin-top: 50px; max-width: 600px; margin-left: auto; margin-right: auto;">
+                <div style="font-family: sans-serif; text-align: center; margin-top: 50px; max-width: 700px; margin-left: auto; margin-right: auto;">
                     <h2 style="color: #006a4e;">✅ জন্মনিবন্ধন যাচাই সফল!</h2>
                     
                     <table style="width: 100%; border-collapse: collapse; margin-top: 20px; text-align: left; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
                         <tr>
-                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white; width: 35%;">তথ্য</th>
-                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white;">বিস্তারিত</th>
+                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white; width: 40%;">সার্ভার থেকে আসা ফিল্ড</th>
+                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white;">সার্ভার থেকে আসা ডেটা</th>
                         </tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>শিক্ষার্থীর নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;"><b>${details.name}</b></td></tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>জন্মতারিখ</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.dob}</td></tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>পিতার নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.father}</td></tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>মাতার নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.mother}</td></tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>লিঙ্গ</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.gender}</td></tr>
-                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>জন্মস্থান</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.birthPlace}</td></tr>
+                        ${allDataRows}
                     </table>
                     
+                    <br>
+                    
+                    <details style="margin-top: 30px; text-align: left; background: #f1f1f1; padding: 15px; border-radius: 5px; border: 1px solid #ccc;">
+                        <summary style="cursor: pointer; font-weight: bold; color: #333;">সার্ভার থেকে আসা সম্পূর্ণ Raw HTML দেখুন (ডেভেলপার অপশন)</summary>
+                        <p style="font-size: 12px; color: #666; margin-top: 10px;">নিচে সরকারি সার্ভার থেকে আসা মূল রেসপন্স দেওয়া হলো:</p>
+                        <textarea style="width: 100%; height: 300px; margin-top: 5px; font-family: monospace; font-size: 13px; padding: 10px; border: 1px solid #aaa;">${html.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                    </details>
+
                     <br><br>
                     <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">নতুন যাচাই করুন</a>
                 </div>
@@ -186,6 +194,12 @@ app.post('/verify', async (req, res) => {
                 <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
                     <h2 style="color: red;">ত্রুটি বা তথ্য মেলেনি! ❌</h2>
                     <p>সম্ভাব্য কারণ: জন্মনিবন্ধন নম্বর ভুল, জন্মতারিখ ভুল অথবা ক্যাপচা ভুল হয়েছে।</p>
+                    
+                    <details style="margin-top: 20px; text-align: left; max-width: 600px; margin: 20px auto; background: #fce4e4; padding: 10px; border-radius: 5px;">
+                        <summary style="cursor: pointer; color: #d9534f; font-weight: bold;">এরর পেজের Raw HTML দেখুন</summary>
+                        <textarea style="width: 100%; height: 200px; margin-top: 10px; font-family: monospace;">${html.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                    </details>
+                    
                     <br>
                     <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">আবার চেষ্টা করুন</a>
                 </div>
