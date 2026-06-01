@@ -9,17 +9,13 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// গ্লোবাল ভেরিয়েবল 
 let globalBrowser = null;
 
-// সার্ভার চালু হওয়ার সাথে সাথেই ব্রাউজার লঞ্চ করে রেডি রাখার ফাংশন
 async function initBrowser() {
     try {
-        // যদি ব্রাউজার আগে থেকে থাকে কিন্তু ক্র্যাশ করে, তবে সেটিকে ক্লিন করা হচ্ছে
         if (globalBrowser) {
             await globalBrowser.close().catch(() => {});
         }
-        
         console.log("--> [INIT] ব্যাকগ্রাউন্ডে ব্রাউজার রেডি করা হচ্ছে...");
         globalBrowser = await puppeteer.launch({ 
             headless: true,
@@ -33,13 +29,13 @@ async function initBrowser() {
                 '--single-process'
             ] 
         });
-        console.log("--> [SUCCESS] ব্রাউজার ব্যাকগ্রাউন্ডে রেডি! এখন রিকোয়েস্ট ফাস্ট হবে।");
+        console.log("--> [SUCCESS] ব্রাউজার ব্যাকগ্রাউন্ডে রেডি!");
     } catch (error) {
         console.error("--> [ERROR] ব্রাউজার রেডি হতে ব্যর্থ:", error);
     }
 }
 
-// ১. হোমপেজ রুট (আগের মতোই)
+// ১. হোমপেজ রুট
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -120,19 +116,15 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ২. সুপার ফাস্ট ক্যাপচা API (ব্রাউজার জীবিত আছে কি না চেক করার লজিকসহ)
+// ২. সুপার ফাস্ট ক্যাপচা API 
 app.get('/api/get-captcha', async (req, res) => {
     let page;
     try {
-        // ম্যাজিক এখানে: ব্রাউজার যদি না থাকে অথবা ক্র্যাশ করে (isConnected false হয়), তবে নতুন করে চালু করবে
         if (!globalBrowser || !globalBrowser.isConnected()) {
-            console.log("ব্রাউজার ডিসকানেক্টেড বা মৃত! নতুন করে চালু করা হচ্ছে...");
             await initBrowser();
         }
 
-        console.log("1. ব্রাউজারে নতুন ট্যাব ওপেন হচ্ছে...");
         page = await globalBrowser.newPage();
-        
         await page.setViewport({ width: 1366, height: 768 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
@@ -145,10 +137,7 @@ app.get('/api/get-captcha', async (req, res) => {
             }
         });
 
-        console.log("2. সরকারি সাইটে নেভিগেট করা হচ্ছে...");
         await page.goto('https://everify.bdris.gov.bd/', { waitUntil: 'domcontentloaded', timeout: 30000 });
-        
-        console.log("3. ক্যাপচা এলিমেন্টের জন্য অপেক্ষা...");
         await page.waitForSelector('#CaptchaImage', { timeout: 15000 });
         
         const csrfToken = await page.$eval('input[name="__RequestVerificationToken"]', el => el.value);
@@ -173,7 +162,7 @@ app.get('/api/get-captcha', async (req, res) => {
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট (JSON আউটপুটসহ - আগের মতোই)
+// ৩. ডেটা ভেরিফাই করার রুট
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
     const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
@@ -192,7 +181,8 @@ app.post('/verify', async (req, res) => {
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Cookie': cookieStr,
-                'Referer': 'https://everify.bdris.gov.bd/'
+                'Referer': 'https://everify.bdris.gov.bd/',
+                'Connection': 'close' // <--- এই লাইনটিই সেই fetch failed-এর ম্যাজিক সমাধান!
             },
             body: fetchParams
         });
@@ -236,7 +226,6 @@ app.post('/verify', async (req, res) => {
                     
                     <div style="text-align: left; background: #282c34; color: #61dafb; padding: 25px; border-radius: 8px; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
                         <button onclick="navigator.clipboard.writeText(document.getElementById('json-data').innerText); alert('✅ JSON কপি হয়েছে!');" style="position: absolute; top: 15px; right: 15px; background: #006a4e; color: white; padding: 8px 15px; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 14px;">কপি করুন</button>
-                        
                         <pre id="json-data" style="margin: 0; font-size: 15px; overflow-x: auto; font-family: monospace;">${JSON.stringify(jsonData, null, 4)}</pre>
                     </div>
                     
@@ -259,7 +248,6 @@ app.post('/verify', async (req, res) => {
     }
 });
 
-// সার্ভার স্টার্ট হওয়ার সময় ব্রাউজার ফাংশন কল করা হচ্ছে
 app.listen(port, async () => {
     console.log(`🚀 === [SERVER LIVE] সার্ভার চালু হয়েছে। পোর্ট: ${port} ===`);
     await initBrowser(); 
