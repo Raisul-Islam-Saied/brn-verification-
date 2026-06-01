@@ -5,54 +5,43 @@ ini_set('display_errors', 1);
 $cookie_file = dirname(__FILE__) . '/cookie.txt';
 $url = "https://everify.bdris.gov.bd/";
 
+// ১. প্রথম রিকোয়েস্ট: পেজের HTML এবং টোকেনগুলো আনা
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, $url);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 curl_setopt($ch, CURLOPT_COOKIEJAR, $cookie_file);
 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
-curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
-// ব্রাউজারের মতো সাজার জন্য User-Agent ও হেডার (এটি ব্লক হওয়া থেকে বাঁচাবে)
-curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language: en-US,en;q=0.5',
-    'Connection: keep-alive',
-]);
+$html = curl_exec($ch);
 
-$response = curl_exec($ch);
-$curl_error = curl_error($ch);
+// CSRF Token খোঁজা
+preg_match('/name="__RequestVerificationToken" type="hidden" value="(.*?)"/', $html, $csrf_match);
+$csrf_token = $csrf_match[1] ?? '';
+
+// CaptchaDeText খোঁজা
+preg_match('/id="CaptchaDeText" name="CaptchaDeText" type="hidden" value="(.*?)"/', $html, $cap_match);
+$captcha_text = $cap_match[1] ?? '';
+
+// Captcha Image URL খোঁজা
+preg_match('/id="CaptchaImage" src="(.*?)"/', $html, $img_match);
+$img_url = "https://everify.bdris.gov.bd" . ($img_match[1] ?? '');
+
+// ২. দ্বিতীয় রিকোয়েস্ট: ক্যাপচা ছবিটি ডাউনলোড করা
+curl_setopt($ch, CURLOPT_URL, $img_url);
+$image_data = curl_exec($ch);
 curl_close($ch);
 
-// যদি cURL রিকোয়েস্টে কোনো এরর থাকে
-if ($curl_error) {
-    echo json_encode(['status' => 'error', 'captcha' => 'সার্ভার কানেকশন এরর: ' . $curl_error]);
-    exit;
-}
-
-// যদি সরকারি সার্ভার থেকে কোনো ডেটা না আসে
-if (empty($response)) {
-    echo json_encode(['status' => 'error', 'captcha' => 'সরকারি সার্ভার থেকে রেসপন্স আসছে না (সম্ভবত আইপি ব্লক)']);
-    exit;
-}
-
-// DOM Document ব্যবহার করে ক্যাপচা এক্সট্র্যাক্ট করা
-$dom = new DOMDocument();
-@$dom->loadHTML($response);
-$xpath = new DOMXPath($dom);
-
-// ক্যাপচার অংকটি খোঁজার জন্য একটু জেনেরিক লজিক দিলাম
-$captcha_node = $xpath->query('//div[contains(@class, "captcha")] | //text()[contains(., "+") or contains(., "-")]')->item(0); 
-
-if ($captcha_node) {
-    $captcha_text = trim($captcha_node->nodeValue);
-    // যদি খুব বড় টেক্সট চলে আসে, সেটা ফিল্টার করা
-    if(strlen($captcha_text) > 15) {
-         echo json_encode(['status' => 'error', 'captcha' => 'সঠিক ক্যাপচা ট্যাগ পাওয়া যায়নি']);
-    } else {
-         echo json_encode(['status' => 'success', 'captcha' => $captcha_text]);
-    }
+if($image_data && $csrf_token) {
+    // ছবিটিকে Base64-এ রূপান্তর করে পাঠানো হচ্ছে
+    $base64_image = 'data:image/jpeg;base64,' . base64_encode($image_data);
+    echo json_encode([
+        'status' => 'success', 
+        'image' => $base64_image, 
+        'csrf' => $csrf_token, 
+        'cap_text' => $captcha_text
+    ]);
 } else {
-    echo json_encode(['status' => 'error', 'captcha' => 'ক্যাপচা HTML-এ পাওয়া যায়নি']);
+    echo json_encode(['status' => 'error', 'message' => 'ক্যাপচা লোড করা যায়নি']);
 }
 ?>
