@@ -84,11 +84,20 @@ app.get('/', (req, res) => {
 app.get('/api/get-captcha', async (req, res) => {
     let browser;
     try {
-        browser = await puppeteer.launch({ 
+                browser = await puppeteer.launch({ 
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', // ডকারে র‍্যাম ক্র্যাশ ঠেকানোর প্রধান হাতিয়ার
+                '--disable-gpu', // গ্রাফিক্স কার্ডের কাজ বন্ধ করা
+                '--no-zygote', 
+                '--single-process', // ব্রাউজারকে একটিমাত্র প্রসেসে চালানো (র‍্যাম বাঁচাবে)
+                '--disable-accelerated-2d-canvas'
+            ] 
         });
+
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
