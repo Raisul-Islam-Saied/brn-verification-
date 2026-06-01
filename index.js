@@ -3,39 +3,50 @@ const puppeteer = require('puppeteer');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// JSON ডেটা আদান-প্রদানের জন্য
+app.use(express.json());
+
 app.get('/', (req, res) => {
-    res.send(`
-        <div style="text-align: center; margin-top: 50px; font-family: sans-serif;">
-            <h2>মাদ্রাসার সার্ভার ঠিকমতো রান করছে! 🚀</h2>
-            <a href="/get-screenshot" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px;">স্ক্রিনশট দেখতে এখানে ক্লিক করুন</a>
-        </div>
-    `);
+    res.send('<h2>মাদ্রাসার BDRIS API সার্ভার ঠিকমতো রান করছে! 🚀</h2>');
 });
 
-app.get('/get-screenshot', async (req, res) => {
+// ১. ক্যাপচা এবং টোকেন আনার API
+app.get('/api/get-captcha', async (req, res) => {
     let browser;
     try {
         browser = await puppeteer.launch({ 
             headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH, // ডকারফাইল থেকে সঠিক পাথ নিয়ে নেবে
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
         });
         const page = await browser.newPage();
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
+        // সরকারি ওয়েবসাইটে প্রবেশ
         await page.goto('https://everify.bdris.gov.bd/', { waitUntil: 'networkidle2', timeout: 60000 });
 
-        const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
-        
-        res.send(`
-            <div style="text-align: center; font-family: sans-serif;">
-                <h3>সার্ভার থেকে নেওয়া লাইভ স্ক্রিনশট:</h3>
-                <img src="data:image/png;base64,${screenshot}" style="border: 2px solid red; max-width: 100%; box-shadow: 0 4px 8px rgba(0,0,0,0.2);" />
-            </div>
-        `);
+        // হিডেন টোকেনগুলো এক্সট্র্যাক্ট করা
+        const csrfToken = await page.$eval('input[name="__RequestVerificationToken"]', el => el.value);
+        const capText = await page.$eval('#CaptchaDeText', el => el.value);
+
+        // সেশন কুকিগুলো সেভ করা (পরবর্তীতে সাবমিট করার জন্য লাগবে)
+        const cookies = await page.cookies();
+
+        // শুধুমাত্র ক্যাপচার ইমেজটির (DOM Element) স্ক্রিনশট নেওয়া
+        const captchaElement = await page.$('#CaptchaImage');
+        const captchaBase64 = await captchaElement.screenshot({ encoding: 'base64' });
+
+        res.json({
+            status: 'success',
+            captchaBase64: 'data:image/png;base64,' + captchaBase64,
+            csrfToken: csrfToken,
+            capText: capText,
+            cookies: cookies
+        });
+
     } catch (error) {
-        res.send("<h3 style='color:red;'>Error:</h3> <p>" + error.message + "</p>");
+        res.json({ status: 'error', message: error.message });
     } finally {
         if (browser) {
             await browser.close();
