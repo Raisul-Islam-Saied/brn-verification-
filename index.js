@@ -1,13 +1,33 @@
 const express = require('express');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+puppeteer.use(StealthPlugin());
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-console.log("--> [STARTUP] ক্যাপচামুক্ত ফাস্ট API সার্ভার চালু হচ্ছে...");
+let globalBrowser = null;
 
-// ১. ফ্রন্টএন্ড ফর্ম
+// ব্রাউজার রেডি রাখার ফাংশন
+async function initBrowser() {
+    try {
+        if (globalBrowser) await globalBrowser.close().catch(() => {});
+        console.log("--> [INIT] স্মার্ট রোবট ব্রাউজার রেডি হচ্ছে...");
+        globalBrowser = await puppeteer.launch({ 
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu', '--no-zygote', '--single-process'] 
+        });
+        console.log("--> [SUCCESS] রোবট রেডি!");
+    } catch (error) {
+        console.error("--> [ERROR] রোবট রেডি হতে ব্যর্থ:", error);
+    }
+}
+
+// ১. আপনার ফ্রন্টএন্ড ফর্ম
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -22,7 +42,7 @@ app.get('/', (req, res) => {
             input[type="text"], input[type="date"] { width: 100%; padding: 10px; margin-top: 5px; margin-bottom: 20px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
             button { background-color: #006a4e; color: white; padding: 12px 15px; border: none; cursor: pointer; width: 100%; border-radius: 4px; font-size: 16px; font-weight: bold; }
             button:hover { background-color: #005a42; }
-            #result { margin-top: 20px; text-align: center; font-weight: bold; font-size: 18px; }
+            #result { margin-top: 20px; text-align: center; font-weight: bold; font-size: 18px; padding: 10px; }
         </style>
     </head>
     <body>
@@ -48,7 +68,7 @@ app.get('/', (req, res) => {
                 const btn = document.getElementById('submitBtn');
                 const resultDiv = document.getElementById('result');
                 
-                btn.innerText = "যাচাই হচ্ছে... ⏳";
+                btn.innerText = "যাচাই হচ্ছে... দয়া করে অপেক্ষা করুন ⏳";
                 btn.disabled = true;
                 resultDiv.innerHTML = "";
 
@@ -65,9 +85,9 @@ app.get('/', (req, res) => {
                     const data = await response.json();
                     
                     if(data.status === 'success') {
-                        resultDiv.innerHTML = '<span style="color: green;">✅ জন্মনিবন্ধনটি সঠিক! (মাদ্রাসায় ভর্তির জন্য উপযুক্ত)</span>';
+                        resultDiv.innerHTML = '<div style="background: #e6f4ea; border: 1px solid #28a745; border-radius: 5px; padding: 10px;"><span style="color: #28a745;">✅ জন্মনিবন্ধনটি সঠিক! (ভর্তির জন্য উপযুক্ত)</span></div>';
                     } else if(data.status === 'invalid') {
-                        resultDiv.innerHTML = '<span style="color: red;">❌ জন্মনিবন্ধনটি ভুল বা তথ্য পাওয়া যায়নি!</span>';
+                        resultDiv.innerHTML = '<div style="background: #fce4e4; border: 1px solid #dc3545; border-radius: 5px; padding: 10px;"><span style="color: #dc3545;">❌ জন্মনিবন্ধনটি ভুল বা তথ্য পাওয়া যায়নি!</span></div>';
                     } else {
                         resultDiv.innerHTML = '<span style="color: red;">⚠️ সার্ভার এরর: ' + data.message + '</span>';
                     }
@@ -84,46 +104,88 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ২. সুপার ফাস্ট Fetch API (Puppeteer ছাড়া)
+// ২. অটোমেটেড রোবট রুট (Puppeteer নিজে সব করবে)
 app.post('/verify', async (req, res) => {
     const { brn, dob } = req.body;
+    let page;
 
     try {
-        // jonmonibondhon.org এর সার্ভারে ডেটা পাঠানো হচ্ছে
-        const fetchParams = new URLSearchParams();
+        if (!globalBrowser || !globalBrowser.isConnected()) await initBrowser();
+        page = await globalBrowser.newPage();
         
-        // -------------------------------------------------------------
-        // সাঈদ ভাই, এখানে একটি ছোট কাজ আছে। jonmonibondhon.org এর ফর্মে 
-        // ইনপুট ফিল্ডের "name" অ্যাট্রিবিউট যা আছে, তা এখানে বসাতে হবে। 
-        // আমি অনুমান করে 'brn' এবং 'dob' লিখলাম।
-        // -------------------------------------------------------------
-        fetchParams.append('brn', brn); 
-        fetchParams.append('dob', dob); 
+        // ওয়েবসাইটে প্রবেশ
+        await page.goto('https://jonmonibondhon.org/', { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        const response = await fetch('https://jonmonibondhon.org/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            },
-            body: fetchParams
-        });
+        // ম্যাজিক স্ক্রিপ্ট: পেজের ভেতরে গিয়ে নিজে নিজে ফর্ম পূরণ করবে
+        await page.evaluate((b, d) => {
+            // ইনপুট ফিল্ড খোঁজা
+            const inputs = Array.from(document.querySelectorAll('input')).filter(el => {
+                const t = el.type.toLowerCase();
+                return t === 'text' || t === 'number' || t === 'tel' || t === 'date' || t === '';
+            });
+            
+            // ডেটা বসানো
+            if(inputs.length >= 2) {
+                inputs[0].value = b;
+                inputs[1].value = d;
+                inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+                inputs[1].dispatchEvent(new Event('input', { bubbles: true }));
+                inputs[0].dispatchEvent(new Event('change', { bubbles: true }));
+                inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            
+            // সাবমিট বাটনে ক্লিক করা
+            const btn = document.querySelector('button[type="submit"], input[type="submit"], button');
+            if(btn) {
+                btn.click();
+            } else {
+                const form = document.querySelector('form');
+                if(form) form.submit();
+            }
+        }, brn, dob);
 
-        const html = await response.text();
+        // রেজাল্ট আসার জন্য ৫ সেকেন্ড অপেক্ষা করা
+        await new Promise(r => setTimeout(r, 5000));
 
-        // রেজাল্ট পেজে নিচের শব্দগুলো থাকলে আমরা ধরে নেব তথ্য সঠিক
-        if (html.includes('সঠিক') || html.includes('Found') || html.includes('সফল') || html.includes(brn)) {
+        // পেজের সম্পূর্ণ লেখা চেক করা
+        const pageText = await page.evaluate(() => document.body.innerText);
+
+        // স্ট্রিক্ট লজিক: ভুল ধরার জন্য (যদি এই শব্দগুলো থাকে, তবে শিওর ভুল)
+        const isError = pageText.includes('Not Found') || 
+                        pageText.toLowerCase().includes('no data') || 
+                        pageText.includes('পাওয়া যায়নি') || 
+                        pageText.includes('ভুল') || 
+                        pageText.includes('Invalid') || 
+                        pageText.toLowerCase().includes('not match') ||
+                        pageText.includes('Does not exist');
+
+        // স্ট্রিক্ট লজিক: সঠিক ধরার জন্য (মাতা/পিতার নাম বা 'নিবন্ধিত ব্যক্তি' আসলেই শুধু সঠিক বলবে)
+        const isSuccess = pageText.includes('মাতার নাম') || 
+                          pageText.includes('পিতার নাম') || 
+                          pageText.includes("Mother's Name") || 
+                          pageText.includes("Father's Name") || 
+                          pageText.includes('Registered Person') ||
+                          pageText.includes('নিবন্ধিত ব্যক্তি') ||
+                          pageText.includes('Date of Registration');
+
+        if (isError) {
+            res.json({ status: "invalid" });
+        } else if (isSuccess) {
             res.json({ status: "success" });
         } else {
+            // কনফিউশন থাকলে সেফটির জন্য ভুল হিসেবেই ধরবে (False Positive বন্ধ করতে)
             res.json({ status: "invalid" });
         }
 
     } catch (error) {
         console.error("❌ [VERIFY ERROR]:", error.message);
         res.json({ status: 'error', message: error.message });
+    } finally {
+        if (page) await page.close();
     }
 });
 
-app.listen(port, () => {
-    console.log(`🚀 === [SERVER LIVE] ফাস্ট সার্ভার চালু হয়েছে। পোর্ট: ${port} ===`);
+app.listen(port, async () => {
+    console.log(`🚀 === [SERVER LIVE] সার্ভার চালু হয়েছে। পোর্ট: ${port} ===`);
+    await initBrowser(); 
 });
