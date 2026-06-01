@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="bn">
 <head>
+    <meta charset="UTF-8">
     <title>ভর্তি সিস্টেম - জন্মনিবন্ধন যাচাই</title>
 </head>
 <body>
@@ -12,19 +13,28 @@
         <label>জন্মতারিখ (YYYY-MM-DD):</label><br>
         <input type="date" name="dob" required><br><br>
         
-        <!-- ক্যাপচা দেখানোর জায়গা -->
-        <label>ক্যাপচা সমাধান করুন: <span id="math_captcha">লোডিং...</span></label><br>
-        <input type="number" name="captcha_answer" required><br><br>
+        <input type="hidden" id="csrf" name="csrf">
+        <input type="hidden" id="cap_text" name="cap_text">
+        
+        <label>ক্যাপচায় কী লেখা আছে লিখুন:</label><br>
+        <img id="captcha_img" src="" alt="ক্যাপচা লোড হচ্ছে..." style="margin-bottom: 10px; border: 1px solid #ccc;"><br>
+        <input type="text" name="captcha_answer" required autocomplete="off"><br><br>
         
         <button type="submit">যাচাই ও আবেদন করুন</button>
     </form>
 
     <script>
-        // পেজ লোড হলে ব্যাকএন্ড থেকে ক্যাপচা নিয়ে আসবে
+        // পেজ লোড হলে ব্যাকএন্ড থেকে ক্যাপচার ছবি ও টোকেন আনবে
         fetch('fetch.php')
             .then(res => res.json())
             .then(data => {
-                document.getElementById('math_captcha').innerText = data.captcha;
+                if(data.status === 'success') {
+                    document.getElementById('captcha_img').src = data.image;
+                    document.getElementById('csrf').value = data.csrf;
+                    document.getElementById('cap_text').value = data.cap_text;
+                } else {
+                    alert('সার্ভার থেকে ক্যাপচা আনা সম্ভব হয়নি!');
+                }
             });
     </script>
 </body>
