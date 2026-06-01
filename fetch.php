@@ -9,11 +9,12 @@ $url = "https://everify.bdris.gov.bd/";
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, $url);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_COOKIEJAR, $cookie_file);
+curl_setopt($ch, CURLOPT_COOKIEJAR, $cookie_file); // কুকি সেভ করবে
+curl_setopt($ch, CURLOPT_COOKIEFILE, $cookie_file); // আগের সেশন থাকলে পাঠাবে
 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false); 
 curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-
 $html = curl_exec($ch);
+curl_close($ch); // প্রথম রিকোয়েস্ট ক্লোজ করে কুকি ফাইলে রাইট করা নিশ্চিত করা হলো
 
 // CSRF Token খোঁজা
 preg_match('/name="__RequestVerificationToken" type="hidden" value="(.*?)"/', $html, $csrf_match);
@@ -25,15 +26,27 @@ $captcha_text = $cap_match[1] ?? '';
 
 // Captcha Image URL খোঁজা
 preg_match('/id="CaptchaImage" src="(.*?)"/', $html, $img_match);
-$img_url = "https://everify.bdris.gov.bd" . ($img_match[1] ?? '');
+$img_path = $img_match[1] ?? '';
+
+// URL এর ভেতরের HTML Entity (যেমন &amp;) কনভার্ট করা জরুরি, নাহলে লিংক কাজ করবে না
+$img_path = html_entity_decode($img_path);
+$img_url = "https://everify.bdris.gov.bd" . $img_path;
 
 // ২. দ্বিতীয় রিকোয়েস্ট: ক্যাপচা ছবিটি ডাউনলোড করা
-curl_setopt($ch, CURLOPT_URL, $img_url);
-$image_data = curl_exec($ch);
-curl_close($ch);
+$ch2 = curl_init();
+curl_setopt($ch2, CURLOPT_URL, $img_url);
+curl_setopt($ch2, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch2, CURLOPT_COOKIEFILE, $cookie_file); // প্রথম রিকোয়েস্টের সেভ করা কুকি ব্যবহার
+curl_setopt($ch2, CURLOPT_SSL_VERIFYPEER, false);
+curl_setopt($ch2, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+curl_setopt($ch2, CURLOPT_REFERER, $url); // সার্ভারকে বোঝানো যে রিকোয়েস্টটি মূল সাইট থেকেই যাচ্ছে
 
-if($image_data && $csrf_token) {
-    // ছবিটিকে Base64-এ রূপান্তর করে পাঠানো হচ্ছে
+$image_data = curl_exec($ch2);
+curl_close($ch2);
+
+// কালো এরর ছবিটির সাইজ সাধারণত খুব ছোট হয় (১ কেবির নিচে), তাই সাইজ চেক করে নেওয়া হলো
+if($image_data && $csrf_token && strlen($image_data) > 1000) {
+    // ছবিটিকে Base64-এ রূপান্তর
     $base64_image = 'data:image/jpeg;base64,' . base64_encode($image_data);
     echo json_encode([
         'status' => 'success', 
@@ -42,6 +55,6 @@ if($image_data && $csrf_token) {
         'cap_text' => $captcha_text
     ]);
 } else {
-    echo json_encode(['status' => 'error', 'message' => 'ক্যাপচা লোড করা যায়নি']);
+    echo json_encode(['status' => 'error', 'message' => 'সঠিক ক্যাপচা ছবি সার্ভার থেকে আসেনি বা সেশন ব্লক হয়েছে']);
 }
 ?>
