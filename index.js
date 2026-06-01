@@ -3,13 +3,25 @@ const puppeteer = require('puppeteer');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// হোমপেজের রুট (Cannot GET / এরর দূর করার জন্য)
+app.get('/', (req, res) => {
+    res.send(`
+        <div style="text-align: center; margin-top: 50px; font-family: sans-serif;">
+            <h2>মাদ্রাসার সার্ভার ঠিকমতো রান করছে! 🚀</h2>
+            <a href="/get-screenshot" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px;">স্ক্রিনশট দেখতে এখানে ক্লিক করুন</a>
+        </div>
+    `);
+});
+
+// স্ক্রিনশট নেওয়ার রুট
 app.get('/get-screenshot', async (req, res) => {
     let browser;
     try {
-        // হেডলেস ক্রোম ব্রাউজার চালু করা
+        // হেডলেস ক্রোম ব্রাউজার চালু করা (পাথ ঠিক করে দেওয়া হয়েছে)
         browser = await puppeteer.launch({ 
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'] 
         });
         const page = await browser.newPage();
         
@@ -23,11 +35,13 @@ app.get('/get-screenshot', async (req, res) => {
         const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
         
         res.send(`
-            <h3>সার্ভার থেকে নেওয়া লাইভ স্ক্রিনশট:</h3>
-            <img src="data:image/png;base64,${screenshot}" style="border: 2px solid red; max-width: 100%;" />
+            <div style="text-align: center; font-family: sans-serif;">
+                <h3>সার্ভার থেকে নেওয়া লাইভ স্ক্রিনশট:</h3>
+                <img src="data:image/png;base64,${screenshot}" style="border: 2px solid red; max-width: 100%; box-shadow: 0 4px 8px rgba(0,0,0,0.2);" />
+            </div>
         `);
     } catch (error) {
-        res.send("<h3>Error:</h3> <p>" + error.message + "</p>");
+        res.send("<h3 style='color:red;'>Error:</h3> <p>" + error.message + "</p>");
     } finally {
         if (browser) {
             await browser.close();
