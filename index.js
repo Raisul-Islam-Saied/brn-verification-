@@ -169,44 +169,55 @@ app.get('/api/get-captcha', async (req, res) => {
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট (JSON আউটপুটসহ)
+// ৩. ডেটা ভেরিফাই করার রুট (সরাসরি ব্রাউজারের ভেতর দিয়ে Cloudflare বাইপাস)
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
-    const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
+    let page;
 
     try {
-        const fetchParams = new URLSearchParams();
-        fetchParams.append('__RequestVerificationToken', csrf);
-        fetchParams.append('UBRN', brn);
-        fetchParams.append('BirthDate', dob);
-        fetchParams.append('CaptchaDeText', cap_text);
-        fetchParams.append('CaptchaInputText', captcha_answer);
+        // যদি ব্রাউজার না থাকে, তবে চালু করবে
+        if (!globalBrowser) await initBrowser();
+        page = await globalBrowser.newPage();
+        
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        const response = await fetch('https://everify.bdris.gov.bd/UBRNVerification/Search', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Cookie': cookieStr,
-                'Referer': 'https://everify.bdris.gov.bd/'
-            },
-            body: fetchParams
+        // আগের সেশনের কুকিগুলো ব্রাউজারে সেট করা হচ্ছে
+        const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
+        const cookieObjs = cookieStr.split('; ').filter(c => c.includes('=')).map(pair => {
+            const [name, ...rest] = pair.split('=');
+            return { name: name.trim(), value: rest.join('=').trim(), domain: 'everify.bdris.gov.bd' };
         });
+        if (cookieObjs.length > 0) {
+            await page.setCookie(...cookieObjs);
+        }
 
-        let html = await response.text();
+        // ব্রাউজারের ভেতর থেকে রিকোয়েস্ট পাঠানো (যাতে Cloudflare ধরতে না পারে)
+        const html = await page.evaluate(async (data) => {
+            const params = new URLSearchParams();
+            params.append('__RequestVerificationToken', data.csrf);
+            params.append('UBRN', data.brn);
+            params.append('BirthDate', data.dob);
+            params.append('CaptchaDeText', data.cap_text);
+            params.append('CaptchaInputText', data.captcha_answer);
 
-        if (html.includes('Registered Person Name') || html.includes('নিবন্ধিত ব্যক্তির নাম')) {
-            
-            // ডেটা গায়ে গায়ে লেগে যাওয়া ঠেকাতে <br> ট্যাগকে ' | ' (পাইপ) চিহ্নে কনভার্ট করা হচ্ছে
-            html = html.replace(/<br\s*[\/]?>/gi, ' | ');
+            const response = await fetch('https://everify.bdris.gov.bd/UBRNVerification/Search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: params
+            });
+            return await response.text();
+        }, { brn, dob, captcha_answer, csrf, cap_text });
 
+        // JSON ডেটা এক্সট্রাক্ট করার লজিক (আগের মতোই)
+        let processedHtml = html.replace(/<br\s*[\/]?>/gi, ' | ');
+
+        if (processedHtml.includes('Registered Person Name') || processedHtml.includes('নিবন্ধিত ব্যক্তির নাম')) {
             const extract = (keyword) => {
                 const regex = new RegExp(`${keyword}[\\s\\S]*?<td[^>]*>([\\s\\S]*?)<\\/td>`, 'i');
-                const m = html.match(regex);
+                const m = processedHtml.match(regex);
                 return m && m[1] ? m[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ') : '';
             };
 
-            // আপনার ডাটাবেসের জন্য একদম পারফেক্ট ও গোছানো JSON ফরম্যাট
             const jsonData = {
                 status: "success",
                 student_info: {
@@ -231,14 +242,10 @@ app.post('/verify', async (req, res) => {
             res.send(`
                 <div style="font-family: sans-serif; text-align: center; margin-top: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
                     <h2 style="color: #006a4e;">✅ জন্মনিবন্ধন যাচাই সফল!</h2>
-                    <p style="color: #555;">মাদ্রাসার ডাটাবেসে সেভ করার জন্য নিচে গোছানো JSON ডেটা দেওয়া হলো:</p>
-                    
                     <div style="text-align: left; background: #282c34; color: #61dafb; padding: 25px; border-radius: 8px; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
                         <button onclick="navigator.clipboard.writeText(document.getElementById('json-data').innerText); alert('✅ JSON কপি হয়েছে!');" style="position: absolute; top: 15px; right: 15px; background: #006a4e; color: white; padding: 8px 15px; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 14px;">কপি করুন</button>
-                        
                         <pre id="json-data" style="margin: 0; font-size: 15px; overflow-x: auto; font-family: monospace;">${JSON.stringify(jsonData, null, 4)}</pre>
                     </div>
-                    
                     <br><br>
                     <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">নতুন যাচাই করুন</a>
                 </div>
@@ -254,7 +261,10 @@ app.post('/verify', async (req, res) => {
             `);
         }
     } catch (error) {
+        console.error("❌ [VERIFY ERROR]:", error.message);
         res.send("<h3 style='color:red; text-align:center;'>সার্ভার এরর: " + error.message + "</h3>");
+    } finally {
+        if (page) await page.close();
     }
 });
 
