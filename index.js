@@ -9,12 +9,17 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// গ্লোবাল ভেরিয়েবল. (ব্রাউজার একবারই ওপেন হয়ে এখানে সেভ থাকবে)
+// গ্লোবাল ভেরিয়েবল 
 let globalBrowser = null;
 
 // সার্ভার চালু হওয়ার সাথে সাথেই ব্রাউজার লঞ্চ করে রেডি রাখার ফাংশন
 async function initBrowser() {
     try {
+        // যদি ব্রাউজার আগে থেকে থাকে কিন্তু ক্র্যাশ করে, তবে সেটিকে ক্লিন করা হচ্ছে
+        if (globalBrowser) {
+            await globalBrowser.close().catch(() => {});
+        }
+        
         console.log("--> [INIT] ব্যাকগ্রাউন্ডে ব্রাউজার রেডি করা হচ্ছে...");
         globalBrowser = await puppeteer.launch({ 
             headless: true,
@@ -34,7 +39,7 @@ async function initBrowser() {
     }
 }
 
-// ১. হোমপেজ রুট
+// ১. হোমপেজ রুট (আগের মতোই)
 app.get('/', (req, res) => {
     res.send(`
     <!DOCTYPE html>
@@ -115,11 +120,15 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ২. সুপার ফাস্ট ক্যাপচা API
+// ২. সুপার ফাস্ট ক্যাপচা API (ব্রাউজার জীবিত আছে কি না চেক করার লজিকসহ)
 app.get('/api/get-captcha', async (req, res) => {
     let page;
     try {
-        if (!globalBrowser) await initBrowser();
+        // ম্যাজিক এখানে: ব্রাউজার যদি না থাকে অথবা ক্র্যাশ করে (isConnected false হয়), তবে নতুন করে চালু করবে
+        if (!globalBrowser || !globalBrowser.isConnected()) {
+            console.log("ব্রাউজার ডিসকানেক্টেড বা মৃত! নতুন করে চালু করা হচ্ছে...");
+            await initBrowser();
+        }
 
         console.log("1. ব্রাউজারে নতুন ট্যাব ওপেন হচ্ছে...");
         page = await globalBrowser.newPage();
@@ -164,7 +173,7 @@ app.get('/api/get-captcha', async (req, res) => {
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট (আপনার কাজ করা fetch + আমার JSON লজিক)
+// ৩. ডেটা ভেরিফাই করার রুট (JSON আউটপুটসহ - আগের মতোই)
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
     const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
@@ -191,8 +200,6 @@ app.post('/verify', async (req, res) => {
         const html = await response.text();
 
         if (html.includes('Registered Person Name') || html.includes('নিবন্ধিত ব্যক্তির নাম')) {
-            
-            // ডেটা গায়ে গায়ে লেগে যাওয়া ঠেকাতে <br> ট্যাগকে ' | ' (পাইপ) চিহ্নে কনভার্ট করা হচ্ছে
             let processedHtml = html.replace(/<br\s*[\/]?>/gi, ' | ');
 
             const extract = (keyword) => {
@@ -201,7 +208,6 @@ app.post('/verify', async (req, res) => {
                 return m && m[1] ? m[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ') : '';
             };
 
-            // আপনার ডাটাবেসের জন্য একদম পারফেক্ট ও গোছানো JSON ফরম্যাট
             const jsonData = {
                 status: "success",
                 student_info: {
