@@ -80,7 +80,7 @@ app.get('/', (req, res) => {
     `);
 });
 
-// ২. ক্যাপচা এবং টোকেন আনার API (আগের মতোই)
+// ২. ক্যাপচা এবং টোকেন আনার API
 app.get('/api/get-captcha', async (req, res) => {
     let browser;
     try {
@@ -115,7 +115,7 @@ app.get('/api/get-captcha', async (req, res) => {
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট (ম্যাজিক এখানে হবে)
+// ৩. ডেটা ভেরিফাই করার রুট
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
     const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
@@ -142,18 +142,43 @@ app.post('/verify', async (req, res) => {
 
         const html = await response.text();
 
-        // HTML থেকে শিক্ষার্থীর নাম খুঁজে বের করা
-        const nameMatch = html.match(/Registered Person Name[^<]*<\/td>\s*<td[^>]*>(.*?)<\/td>/i);
+        // HTML থেকে নির্দিষ্ট তথ্যগুলো নিখুঁতভাবে বের করার ফাংশন
+        const extract = (keyword) => {
+            const regex = new RegExp(`${keyword}[^<]*<\\/td>\\s*<td[^>]*>([\\s\\S]*?)<\\/td>`, 'i');
+            const m = html.match(regex);
+            return m && m[1] ? m[1].replace(/<[^>]*>/g, '').trim() : '';
+        };
+
+        // সব তথ্য একসাথে একটি অবজেক্টে সেভ করা
+        const details = {
+            name: extract('Registered Person Name') || extract('নিবন্ধিত ব্যক্তির নাম'),
+            dob: extract('Date of Birth') || extract('জন্ম তারিখ'),
+            father: extract("Father's Name") || extract('পিতার নাম'),
+            mother: extract("Mother's Name") || extract('মাতার নাম'),
+            gender: extract('Sex') || extract('লিঙ্গ'),
+            birthPlace: extract('Place of Birth') || extract('জন্মস্থান')
+        };
         
-        if (nameMatch && nameMatch[1]) {
+        if (details.name) {
             res.send(`
-                <div style="font-family: sans-serif; text-align: center; margin-top: 50px;">
-                    <h2 style="color: green;">যাচাই সফল! 🎉</h2>
-                    <h3 style="background: #e6f4ea; padding: 15px; border-radius: 8px; display: inline-block;">
-                        শিক্ষার্থীর নাম: <span style="color: #006a4e;">${nameMatch[1].trim()}</span>
-                    </h3>
+                <div style="font-family: sans-serif; text-align: center; margin-top: 50px; max-width: 600px; margin-left: auto; margin-right: auto;">
+                    <h2 style="color: #006a4e;">✅ জন্মনিবন্ধন যাচাই সফল!</h2>
+                    
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px; text-align: left; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+                        <tr>
+                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white; width: 35%;">তথ্য</th>
+                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white;">বিস্তারিত</th>
+                        </tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>শিক্ষার্থীর নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;"><b>${details.name}</b></td></tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>জন্মতারিখ</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.dob}</td></tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>পিতার নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.father}</td></tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>মাতার নাম</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.mother}</td></tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>লিঙ্গ</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.gender}</td></tr>
+                        <tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>জন্মস্থান</b></td><td style="padding: 10px; border: 1px solid #ddd;">${details.birthPlace}</td></tr>
+                    </table>
+                    
                     <br><br>
-                    <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px;">নতুন যাচাই করুন</a>
+                    <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">নতুন যাচাই করুন</a>
                 </div>
             `);
         } else {
@@ -162,7 +187,7 @@ app.post('/verify', async (req, res) => {
                     <h2 style="color: red;">ত্রুটি বা তথ্য মেলেনি! ❌</h2>
                     <p>সম্ভাব্য কারণ: জন্মনিবন্ধন নম্বর ভুল, জন্মতারিখ ভুল অথবা ক্যাপচা ভুল হয়েছে।</p>
                     <br>
-                    <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px;">আবার চেষ্টা করুন</a>
+                    <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">আবার চেষ্টা করুন</a>
                 </div>
             `);
         }
