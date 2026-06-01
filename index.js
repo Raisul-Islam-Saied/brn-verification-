@@ -9,7 +9,7 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// গ্লোবাল ভেরিয়েবল (ব্রাউজার একবারই ওপেন হয়ে এখানে সেভ থাকবে)
+// গ্লোবাল ভেরিয়েবল. (ব্রাউজার একবারই ওপেন হয়ে এখানে সেভ থাকবে)
 let globalBrowser = null;
 
 // সার্ভার চালু হওয়ার সাথে সাথেই ব্রাউজার লঞ্চ করে রেডি রাখার ফাংশন
