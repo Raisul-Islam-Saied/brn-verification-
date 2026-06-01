@@ -80,7 +80,6 @@ app.get('/', (req, res) => {
         </div>
 
         <script>
-            // টাইমআউট কমিয়ে ৩০ সেকেন্ড করা হলো, কারণ এখন আর দেরি হবে না
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -120,17 +119,14 @@ app.get('/', (req, res) => {
 app.get('/api/get-captcha', async (req, res) => {
     let page;
     try {
-        // যদি ব্রাউজার কোনো কারণে ক্র্যাশ করে থাকে, তবে নতুন করে ওপেন করবে
         if (!globalBrowser) await initBrowser();
 
         console.log("1. ব্রাউজারে নতুন ট্যাব ওপেন হচ্ছে...");
-        // পুরো ব্রাউজার লঞ্চ না করে, শুধু একটি নতুন ট্যাব খোলা হচ্ছে (খুবই দ্রুত)
         page = await globalBrowser.newPage();
         
         await page.setViewport({ width: 1366, height: 768 });
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // অপ্রয়োজনীয় ফাইল লোড হওয়া বন্ধ করা হচ্ছে স্পিড বাড়ানোর জন্য
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['stylesheet', 'font', 'media'].includes(request.resourceType())) {
@@ -164,12 +160,11 @@ app.get('/api/get-captcha', async (req, res) => {
         console.error("❌ [API ERROR]:", error.message);
         res.json({ status: 'error', message: error.message });
     } finally {
-        // কাজ শেষে পুরো ব্রাউজার ক্লোজ না করে শুধুমাত্র কারেন্ট ট্যাব (Page) ক্লোজ করা হচ্ছে
         if (page) await page.close();
     }
 });
 
-// ৩. ডেটা ভেরিফাই করার রুট
+// ৩. ডেটা ভেরিফাই করার রুট (আপনার কাজ করা fetch + আমার JSON লজিক)
 app.post('/verify', async (req, res) => {
     const { brn, dob, captcha_answer, csrf, cap_text, cookie_data } = req.body;
     const cookieStr = Buffer.from(cookie_data, 'base64').toString('utf-8');
@@ -196,29 +191,50 @@ app.post('/verify', async (req, res) => {
         const html = await response.text();
 
         if (html.includes('Registered Person Name') || html.includes('নিবন্ধিত ব্যক্তির নাম')) {
-            const regex = /<tr[^>]*>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<td[^>]*>([\s\S]*?)<\/td>\s*<\/tr>/gi;
-            let match;
-            let allDataRows = '';
             
-            while ((match = regex.exec(html)) !== null) {
-                let key = match[1].replace(/<[^>]*>/g, '').trim();
-                let value = match[2].replace(/<[^>]*>/g, '').trim();
-                if (key && value && key.length < 100) {
-                    allDataRows += `<tr><td style="padding: 10px; border: 1px solid #ddd; background: #f9f9f9;"><b>${key}</b></td><td style="padding: 10px; border: 1px solid #ddd;"><b>${value}</b></td></tr>`;
+            // ডেটা গায়ে গায়ে লেগে যাওয়া ঠেকাতে <br> ট্যাগকে ' | ' (পাইপ) চিহ্নে কনভার্ট করা হচ্ছে
+            let processedHtml = html.replace(/<br\s*[\/]?>/gi, ' | ');
+
+            const extract = (keyword) => {
+                const regex = new RegExp(`${keyword}[\\s\\S]*?<td[^>]*>([\\s\\S]*?)<\\/td>`, 'i');
+                const m = processedHtml.match(regex);
+                return m && m[1] ? m[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' ') : '';
+            };
+
+            // আপনার ডাটাবেসের জন্য একদম পারফেক্ট ও গোছানো JSON ফরম্যাট
+            const jsonData = {
+                status: "success",
+                student_info: {
+                    brn: brn,
+                    dob: dob,
+                    name_bn: extract('নিবন্ধিত ব্যক্তির নাম'),
+                    name_en: extract('Registered Person Name'),
+                    gender: extract('Sex') || extract('লিঙ্গ'),
+                    birth_place_bn: extract('জন্মস্থান'),
+                    birth_place_en: extract('Place of Birth')
+                },
+                parents_info: {
+                    father_name_bn: extract('পিতার নাম'),
+                    father_name_en: extract("Father's Name"),
+                    father_nationality: extract('পিতার জাতীয়তা') || extract("Father's Nationality"),
+                    mother_name_bn: extract('মাতার নাম'),
+                    mother_name_en: extract("Mother's Name"),
+                    mother_nationality: extract('মাতার জাতীয়তা') || extract("Mother's Nationality")
                 }
-            }
+            };
 
             res.send(`
-                <div style="font-family: sans-serif; text-align: center; margin-top: 50px; max-width: 700px; margin-left: auto; margin-right: auto;">
+                <div style="font-family: sans-serif; text-align: center; margin-top: 30px; max-width: 800px; margin-left: auto; margin-right: auto;">
                     <h2 style="color: #006a4e;">✅ জন্মনিবন্ধন যাচাই সফল!</h2>
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 20px; text-align: left; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
-                        <tr>
-                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white; width: 40%;">সার্ভার থেকে আসা ফিল্ড</th>
-                            <th style="padding: 12px; border: 1px solid #ddd; background-color: #006a4e; color: white;">সার্ভার থেকে আসা ডেটা</th>
-                        </tr>
-                        ${allDataRows}
-                    </table>
-                    <br>
+                    <p style="color: #555;">মাদ্রাসার ডাটাবেসে সেভ করার জন্য নিচে গোছানো JSON ডেটা দেওয়া হলো:</p>
+                    
+                    <div style="text-align: left; background: #282c34; color: #61dafb; padding: 25px; border-radius: 8px; position: relative; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+                        <button onclick="navigator.clipboard.writeText(document.getElementById('json-data').innerText); alert('✅ JSON কপি হয়েছে!');" style="position: absolute; top: 15px; right: 15px; background: #006a4e; color: white; padding: 8px 15px; border: none; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 14px;">কপি করুন</button>
+                        
+                        <pre id="json-data" style="margin: 0; font-size: 15px; overflow-x: auto; font-family: monospace;">${JSON.stringify(jsonData, null, 4)}</pre>
+                    </div>
+                    
+                    <br><br>
                     <a href="/" style="padding: 10px 20px; background: #006a4e; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">নতুন যাচাই করুন</a>
                 </div>
             `);
